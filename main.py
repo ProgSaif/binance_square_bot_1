@@ -4,40 +4,41 @@ import time
 import requests
 import schedule
 from telegram import Bot
-from PIL import Image
-from io import BytesIO
-import openai
 
+# ----------------------------
 # Load environment variables
+# ----------------------------
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 BINANCE_API = os.getenv("BINANCE_API")
-OPENAI_KEY = os.getenv("OPENAI_KEY")
 
 bot = Bot(token=TELEGRAM_TOKEN)
-openai.api_key = OPENAI_KEY
-
 previous_symbols = set()
 
-# --- Binance Market Data ---
+# ----------------------------
+# Binance Market Data
+# ----------------------------
 def get_market_data():
     url = "https://api.binance.com/api/v3/ticker/24hr"
     try:
         response = requests.get(url, timeout=10)
-        response.raise_for_status()  # will raise HTTPError for bad status
+        response.raise_for_status()
         data = response.json()
 
         if not isinstance(data, list):
             print("Unexpected Binance response:", data)
-            return []  # return empty list so bot won't crash
+            return []
 
+        print(f"Fetched {len(data)} coins from Binance")
         return data
 
     except Exception as e:
         print("Error fetching Binance data:", e)
         return []
 
-# --- New Listings ---
+# ----------------------------
+# New Listings
+# ----------------------------
 def detect_new_listings(data):
     global previous_symbols
     current_symbols = {coin['symbol'] for coin in data}
@@ -45,102 +46,124 @@ def detect_new_listings(data):
     previous_symbols = current_symbols
     return new_listings
 
-# --- Top Gainers ---
+# ----------------------------
+# Top Gainers
+# ----------------------------
 def get_top_gainers(data, top=5):
     sorted_data = sorted(data, key=lambda x: float(x['priceChangePercent']), reverse=True)
     return sorted_data[:top]
 
-# --- Top Losers ---
+# ----------------------------
+# Top Losers
+# ----------------------------
 def get_top_losers(data, top=5):
     sorted_data = sorted(data, key=lambda x: float(x['priceChangePercent']))
     return sorted_data[:top]
 
-# --- Volume Spikes ---
+# ----------------------------
+# Volume Spikes
+# ----------------------------
 def detect_volume_spikes(data):
     spikes = [coin for coin in data if float(coin['volume']) > 50000000]
     return spikes[:5]
 
-# --- AI Signal Text Generator ---
-def generate_ai_text(symbol, change):
-    # simple template text
+# ----------------------------
+# Signal Text Generator (free)
+# ----------------------------
+def generate_signal_text(symbol, change):
     return f"{symbol} is moving {change}% in 24h! Check the chart for entry, SL, TP levels."
 
-# --- Hashtags ---
+# ----------------------------
+# Hashtags
+# ----------------------------
 def generate_hashtags(symbol):
     coin = symbol.replace("USDT", "")
     tags = [f"#{coin}", "#crypto", "#binance", "#altcoins", "#cryptotrading"]
     return " ".join(tags)
 
-# --- Chart Screenshot (TradingView) ---
-def get_chart(symbol):
-    url = f"https://s.tradingview.com/widgetembed/?symbol=BINANCE:{symbol}"
-    img = requests.get(url).content
-    filename = f"{symbol}.png"
-    with open(filename, "wb") as f:
-        f.write(img)
-    return filename
-
-# --- Telegram Post ---
-def send_telegram(message, image=None):
-    if image:
-        bot.send_photo(chat_id=CHAT_ID, photo=open(image, "rb"), caption=message)
-    else:
+# ----------------------------
+# Telegram Post
+# ----------------------------
+def send_telegram(message):
+    try:
         bot.send_message(chat_id=CHAT_ID, text=message)
+        print("Telegram sent:", message)
+    except Exception as e:
+        print("Telegram Error:", e)
 
-# --- Binance Square Post ---
+# ----------------------------
+# Binance Square Post
+# ----------------------------
 def post_binance(message):
-    url = "https://api.binance.com/sapi/v1/feed/post/create"
-    headers = {"X-MBX-APIKEY": BINANCE_API}
-    payload = {"type":"text","content":message}
-    requests.post(url, headers=headers, json=payload)
+    try:
+        url = "https://api.binance.com/sapi/v1/feed/post/create"
+        headers = {"X-MBX-APIKEY": BINANCE_API}
+        payload = {"type":"text","content":message}
+        r = requests.post(url, headers=headers, json=payload)
+        print("Binance response:", r.status_code, r.text)
+    except Exception as e:
+        print("Binance Error:", e)
 
-# --- Generate Post ---
+# ----------------------------
+# Generate Full Post
+# ----------------------------
 def create_post(symbol, change):
-    ai_text = generate_ai_text(symbol, change)
+    text = generate_signal_text(symbol, change)
     hashtags = generate_hashtags(symbol)
-    message = f"{ai_text}\n24h Change: {change}%\n{hashtags}"
-    return message
+    return f"{text}\n24h Change: {change}%\n{hashtags}"
 
-# --- Main Bot Function ---
+# ----------------------------
+# Main Bot Function
+# ----------------------------
 def run_signal_bot():
+    print("Running signal bot...")
     data = get_market_data()
+    if not data:
+        print("No data fetched, skipping this run.")
+        return
 
-    # New Listings
+    # --- New Listings ---
     new_tokens = detect_new_listings(data)
+    print("New Listings:", new_tokens)
     for token in new_tokens:
         msg = f"🚨 NEW BINANCE LISTING\nToken: {token}\nHigh volatility expected.\n#Binance #Crypto #Trading"
-        chart = get_chart(token)
-        send_telegram(msg, chart)
+        send_telegram(msg)
         post_binance(msg)
 
-    # Top Gainers
+    # --- Top Gainers ---
     gainers = get_top_gainers(data)
+    print("Top Gainers:", [g['symbol'] for g in gainers])
     for g in gainers:
         msg = create_post(g['symbol'], g['priceChangePercent'])
-        chart = get_chart(g['symbol'])
-        send_telegram(msg, chart)
+        send_telegram(msg)
         post_binance(msg)
 
-    # Top Losers
+    # --- Top Losers ---
     losers = get_top_losers(data)
+    print("Top Losers:", [l['symbol'] for l in losers])
     for l in losers:
         msg = create_post(l['symbol'], l['priceChangePercent'])
-        chart = get_chart(l['symbol'])
-        send_telegram(msg, chart)
+        send_telegram(msg)
         post_binance(msg)
 
-    # Volume Spikes
+    # --- Volume Spikes ---
     spikes = detect_volume_spikes(data)
+    print("Volume Spikes:", [s['symbol'] for s in spikes])
     for s in spikes:
         msg = create_post(s['symbol'], s['priceChangePercent'])
-        chart = get_chart(s['symbol'])
-        send_telegram(msg, chart)
+        send_telegram(msg)
         post_binance(msg)
 
-# --- Scheduler ---
-schedule.every(10).minutes.do(run_signal_bot)
+# ----------------------------
+# Immediate Test Run
+# ----------------------------
+print("Crypto Signal Bot is starting...")
+run_signal_bot()  # run immediately on deploy
 
-print("Crypto Signal Bot is running...")
+# ----------------------------
+# Scheduler: Run Every 10 Minutes
+# ----------------------------
+schedule.every(10).minutes.do(run_signal_bot)
 
 while True:
     schedule.run_pending()
