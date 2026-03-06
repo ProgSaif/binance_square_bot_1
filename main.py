@@ -22,8 +22,20 @@ previous_symbols = set()
 # --- Binance Market Data ---
 def get_market_data():
     url = "https://api.binance.com/api/v3/ticker/24hr"
-    data = requests.get(url).json()
-    return data
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()  # will raise HTTPError for bad status
+        data = response.json()
+
+        if not isinstance(data, list):
+            print("Unexpected Binance response:", data)
+            return []  # return empty list so bot won't crash
+
+        return data
+
+    except Exception as e:
+        print("Error fetching Binance data:", e)
+        return []
 
 # --- New Listings ---
 def detect_new_listings(data):
