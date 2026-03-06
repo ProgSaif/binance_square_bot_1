@@ -50,12 +50,8 @@ def detect_volume_spikes(data):
 
 # --- AI Signal Text Generator ---
 def generate_ai_text(symbol, change):
-    prompt = f"Write a short crypto trading signal post for {symbol} with 24h change {change}%. Make it engaging and short."
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[{"role":"user","content":prompt}]
-    )
-    return response.choices[0].message.content
+    # simple template text
+    return f"{symbol} is moving {change}% in 24h! Check the chart for entry, SL, TP levels."
 
 # --- Hashtags ---
 def generate_hashtags(symbol):
