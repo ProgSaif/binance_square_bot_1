@@ -19,26 +19,16 @@ previous_symbols = set()
 # Binance Market Data
 # ----------------------------
 def get_market_data():
-    url = "https://api.binance.com/api/v3/ticker/24hr"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/120.0.0.0 Safari/537.36"
-    }
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 250, "page": 1}
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
-
-        if not isinstance(data, list):
-            print("Unexpected Binance response:", data)
-            return []
-
-        print(f"Fetched {len(data)} coins from Binance")
+        print(f"Fetched {len(data)} coins from CoinGecko")
         return data
-
     except Exception as e:
-        print("Error fetching Binance data:", e)
+        print("Error fetching CoinGecko data:", e)
         return []
 
 # ----------------------------
