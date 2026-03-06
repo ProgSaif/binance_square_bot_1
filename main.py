@@ -20,8 +20,13 @@ previous_symbols = set()
 # ----------------------------
 def get_market_data():
     url = "https://api.binance.com/api/v3/ticker/24hr"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/120.0.0.0 Safari/537.36"
+    }
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         data = response.json()
 
