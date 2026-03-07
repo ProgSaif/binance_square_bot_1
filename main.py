@@ -125,10 +125,10 @@ def generate_signals(data):
         if change is None:
             continue
 
-        if change > 1:
+        if change > 5:
             gainers.append(coin)
 
-        elif change < -1:
+        elif change < -5:
             losers.append(coin)
 
     return gainers, losers
@@ -143,7 +143,7 @@ def format_signal(gainers, losers):
 
     if gainers:
 
-        message += "*📈 Top Gainers (>8%)*\n"
+        message += "*📈 Top Gainers (>5%)*\n"
 
         for coin in gainers[:5]:
 
