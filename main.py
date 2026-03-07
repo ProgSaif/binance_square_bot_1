@@ -12,7 +12,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
-FETCH_INTERVAL = 60  # 10 minutes
+FETCH_INTERVAL = 600  # 10 minutes
 MAX_RETRIES = 5
 
 # =========================
