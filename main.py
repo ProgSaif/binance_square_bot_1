@@ -1,165 +1,210 @@
-# main.py
-import os
-import time
 import requests
-import schedule
-from telegram import Bot
+import time
+import logging
+import os
 
-# ----------------------------
-# Load environment variables
-# ----------------------------
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-BINANCE_API = os.getenv("BINANCE_API")
+# =========================
+# CONFIG
+# =========================
 
-bot = Bot(token=TELEGRAM_TOKEN)
-previous_symbols = set()
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# ----------------------------
-# Binance Market Data
-# ----------------------------
-def get_market_data():
-    url = "https://api.coingecko.com/api/v3/coins/markets"
-    params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 250, "page": 1}
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        print(f"Fetched {len(data)} coins from CoinGecko")
-        return data
-    except Exception as e:
-        print("Error fetching CoinGecko data:", e)
-        return []
+COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
-# ----------------------------
-# New Listings
-# ----------------------------
-def detect_new_listings(data):
-    global previous_symbols
-    current_symbols = {coin['symbol'] for coin in data}
-    new_listings = current_symbols - previous_symbols
-    previous_symbols = current_symbols
-    return new_listings
+FETCH_INTERVAL = 600  # 10 minutes
+MAX_RETRIES = 5
 
-# ----------------------------
-# Top Gainers
-# ----------------------------
-def get_top_gainers(data, top=5):
-    sorted_data = sorted(data, key=lambda x: float(x['priceChangePercent']), reverse=True)
-    return sorted_data[:top]
+# =========================
+# LOGGING SETUP
+# =========================
 
-# ----------------------------
-# Top Losers
-# ----------------------------
-def get_top_losers(data, top=5):
-    sorted_data = sorted(data, key=lambda x: float(x['priceChangePercent']))
-    return sorted_data[:top]
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
 
-# ----------------------------
-# Volume Spikes
-# ----------------------------
-def detect_volume_spikes(data):
-    spikes = [coin for coin in data if float(coin['volume']) > 50000000]
-    return spikes[:5]
+logger = logging.getLogger()
 
-# ----------------------------
-# Signal Text Generator (free)
-# ----------------------------
-def generate_signal_text(symbol, change):
-    return f"{symbol} is moving {change}% in 24h! Check the chart for entry, SL, TP levels."
+# =========================
+# TELEGRAM SENDER
+# =========================
 
-# ----------------------------
-# Hashtags
-# ----------------------------
-def generate_hashtags(symbol):
-    coin = symbol.replace("USDT", "")
-    tags = [f"#{coin}", "#crypto", "#binance", "#altcoins", "#cryptotrading"]
-    return " ".join(tags)
-
-# ----------------------------
-# Telegram Post
-# ----------------------------
 def send_telegram(message):
-    try:
-        bot.send_message(chat_id=CHAT_ID, text=message)
-        print("Telegram sent:", message)
-    except Exception as e:
-        print("Telegram Error:", e)
 
-# ----------------------------
-# Binance Square Post
-# ----------------------------
-def post_binance(message):
-    try:
-        url = "https://api.binance.com/sapi/v1/feed/post/create"
-        headers = {"X-MBX-APIKEY": BINANCE_API}
-        payload = {"type":"text","content":message}
-        r = requests.post(url, headers=headers, json=payload)
-        print("Binance response:", r.status_code, r.text)
-    except Exception as e:
-        print("Binance Error:", e)
-
-# ----------------------------
-# Generate Full Post
-# ----------------------------
-def create_post(symbol, change):
-    text = generate_signal_text(symbol, change)
-    hashtags = generate_hashtags(symbol)
-    return f"{text}\n24h Change: {change}%\n{hashtags}"
-
-# ----------------------------
-# Main Bot Function
-# ----------------------------
-def run_signal_bot():
-    print("Running signal bot...")
-    data = get_market_data()
-    if not data:
-        print("No data fetched, skipping this run.")
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.error("Telegram credentials missing")
         return
 
-    # --- New Listings ---
-    new_tokens = detect_new_listings(data)
-    print("New Listings:", new_tokens)
-    for token in new_tokens:
-        msg = f"🚨 NEW BINANCE LISTING\nToken: {token}\nHigh volatility expected.\n#Binance #Crypto #Trading"
-        send_telegram(msg)
-        post_binance(msg)
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
-    # --- Top Gainers ---
-    gainers = get_top_gainers(data)
-    print("Top Gainers:", [g['symbol'] for g in gainers])
-    for g in gainers:
-        msg = create_post(g['symbol'], g['priceChangePercent'])
-        send_telegram(msg)
-        post_binance(msg)
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
 
-    # --- Top Losers ---
-    losers = get_top_losers(data)
-    print("Top Losers:", [l['symbol'] for l in losers])
-    for l in losers:
-        msg = create_post(l['symbol'], l['priceChangePercent'])
-        send_telegram(msg)
-        post_binance(msg)
+    try:
+        r = requests.post(url, json=payload, timeout=10)
+        r.raise_for_status()
+        logger.info("Message sent to Telegram")
 
-    # --- Volume Spikes ---
-    spikes = detect_volume_spikes(data)
-    print("Volume Spikes:", [s['symbol'] for s in spikes])
-    for s in spikes:
-        msg = create_post(s['symbol'], s['priceChangePercent'])
-        send_telegram(msg)
-        post_binance(msg)
+    except Exception as e:
+        logger.error(f"Telegram error: {e}")
 
-# ----------------------------
-# Immediate Test Run
-# ----------------------------
-print("Crypto Signal Bot is starting...")
-run_signal_bot()  # run immediately on deploy
+# =========================
+# SAFE API FETCH
+# =========================
 
-# ----------------------------
-# Scheduler: Run Every 10 Minutes
-# ----------------------------
-schedule.every(10).minutes.do(run_signal_bot)
+def fetch_market_data():
 
-while True:
-    schedule.run_pending()
-    time.sleep(1)
+    params = {
+        "vs_currency": "usd",
+        "order": "market_cap_desc",
+        "per_page": 50,
+        "page": 1,
+        "price_change_percentage": "24h"
+    }
+
+    headers = {
+        "User-Agent": "crypto-signal-bot"
+    }
+
+    for attempt in range(MAX_RETRIES):
+
+        try:
+
+            logger.info(f"Fetching CoinGecko data (attempt {attempt+1})")
+
+            response = requests.get(
+                COINGECKO_URL,
+                params=params,
+                headers=headers,
+                timeout=15
+            )
+
+            if response.status_code == 429:
+
+                wait = 15 * (attempt + 1)
+                logger.warning(f"Rate limited. Waiting {wait}s")
+                time.sleep(wait)
+                continue
+
+            response.raise_for_status()
+
+            data = response.json()
+
+            logger.info(f"Fetched {len(data)} coins")
+
+            return data
+
+        except Exception as e:
+
+            logger.error(f"API error: {e}")
+
+            wait = 10 * (attempt + 1)
+            logger.info(f"Retrying in {wait}s")
+
+            time.sleep(wait)
+
+    return []
+
+# =========================
+# SIGNAL GENERATION
+# =========================
+
+def generate_signals(data):
+
+    gainers = []
+    losers = []
+
+    for coin in data:
+
+        change = coin.get("price_change_percentage_24h")
+
+        if change is None:
+            continue
+
+        if change > 8:
+            gainers.append(coin)
+
+        elif change < -8:
+            losers.append(coin)
+
+    return gainers, losers
+
+# =========================
+# FORMAT MESSAGE
+# =========================
+
+def format_signal(gainers, losers):
+
+    message = "*🚨 Crypto Market Signals*\n\n"
+
+    if gainers:
+
+        message += "*📈 Top Gainers (>8%)*\n"
+
+        for coin in gainers[:5]:
+
+            message += (
+                f"{coin['name']} ({coin['symbol'].upper()})\n"
+                f"Price: ${coin['current_price']}\n"
+                f"24h Change: {round(coin['price_change_percentage_24h'],2)}%\n\n"
+            )
+
+    if losers:
+
+        message += "*📉 Top Losers (<-8%)*\n"
+
+        for coin in losers[:5]:
+
+            message += (
+                f"{coin['name']} ({coin['symbol'].upper()})\n"
+                f"Price: ${coin['current_price']}\n"
+                f"24h Change: {round(coin['price_change_percentage_24h'],2)}%\n\n"
+            )
+
+    if not gainers and not losers:
+        message += "No strong signals right now."
+
+    return message
+
+# =========================
+# BOT LOOP
+# =========================
+
+def run_bot():
+
+    logger.info("Crypto Signal Bot is starting...")
+
+    # immediate test message
+    send_telegram("✅ Crypto Signal Bot deployed successfully on Railway!")
+
+    while True:
+
+        logger.info("Running signal check...")
+
+        data = fetch_market_data()
+
+        if not data:
+            logger.warning("No data fetched, skipping this cycle")
+            time.sleep(FETCH_INTERVAL)
+            continue
+
+        gainers, losers = generate_signals(data)
+
+        message = format_signal(gainers, losers)
+
+        send_telegram(message)
+
+        logger.info(f"Sleeping {FETCH_INTERVAL}s")
+
+        time.sleep(FETCH_INTERVAL)
+
+# =========================
+# START
+# =========================
+
+if __name__ == "__main__":
+    run_bot()
