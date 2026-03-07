@@ -12,7 +12,7 @@ import numpy as np
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-FETCH_INTERVAL = 600
+FETCH_INTERVAL = 60
 MAX_RETRIES = 5
 
 BINANCE_TICKER = "https://api.binance.com/api/v3/ticker/24hr"
