@@ -125,10 +125,10 @@ def generate_signals(data):
         if change is None:
             continue
 
-        if change > 8:
+        if change > 1:
             gainers.append(coin)
 
-        elif change < -8:
+        elif change < -1:
             losers.append(coin)
 
     return gainers, losers
