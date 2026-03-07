@@ -1,6 +1,1 @@
 requests
-python-telegram-bot
-schedule
-openai
-pillow
-flask
