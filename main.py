@@ -45,7 +45,7 @@ def send_telegram(message):
     }
 
     try:
-        r = requests.post(url, json=payload, timeout=10)
+        r = requests.post(url, json=payload, timeout=1)
         r.raise_for_status()
         logger.info("Message sent to Telegram")
 
