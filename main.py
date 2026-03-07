@@ -1,275 +1,319 @@
 import requests
-import time
 import os
+import time
 import logging
 import matplotlib.pyplot as plt
+import numpy as np
 
-# =========================
+# ======================
 # CONFIG
-# =========================
+# ======================
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-COINGECKO_MARKET_URL = "https://api.coingecko.com/api/v3/coins/markets"
-COINGECKO_CHART_URL = "https://api.coingecko.com/api/v3/coins/{}/market_chart"
-
 FETCH_INTERVAL = 600
 MAX_RETRIES = 5
 
-# =========================
+BINANCE_TICKER = "https://api.binance.com/api/v3/ticker/24hr"
+BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
+BINANCE_EXCHANGE = "https://api.binance.com/api/v3/exchangeInfo"
+
+# ======================
 # LOGGING
-# =========================
+# ======================
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
+    format="%(asctime)s | %(levelname)s | %(message)s"
 )
 
 logger = logging.getLogger()
 
-# =========================
-# TELEGRAM TEXT MESSAGE
-# =========================
+known_pairs = set()
 
-def send_telegram(message):
+# ======================
+# TELEGRAM
+# ======================
 
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.error("Telegram credentials missing")
-        return
+def send_message(text):
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
+        "text": text,
         "parse_mode": "Markdown"
     }
 
     try:
-        r = requests.post(url, json=payload, timeout=10)
-        r.raise_for_status()
-        logger.info("Telegram message sent")
+
+        requests.post(url, json=payload)
 
     except Exception as e:
-        logger.error(f"Telegram error: {e}")
 
-# =========================
-# TELEGRAM PHOTO MESSAGE
-# =========================
+        logger.error(e)
 
-def send_chart(message, chart_file):
+
+def send_chart(text, image):
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
 
     try:
 
-        with open(chart_file, "rb") as photo:
+        with open(image, "rb") as img:
 
-            files = {"photo": photo}
+            files = {"photo": img}
 
             payload = {
                 "chat_id": TELEGRAM_CHAT_ID,
-                "caption": message,
+                "caption": text,
                 "parse_mode": "Markdown"
             }
 
-            r = requests.post(url, data=payload, files=files)
-            r.raise_for_status()
-
-            logger.info("Chart sent to Telegram")
+            requests.post(url, data=payload, files=files)
 
     except Exception as e:
-        logger.error(f"Telegram chart error: {e}")
 
-# =========================
-# FETCH MARKET DATA
-# =========================
+        logger.error(e)
 
-def fetch_market():
+# ======================
+# BINANCE DATA
+# ======================
 
-    params = {
-        "vs_currency": "usd",
-        "order": "market_cap_desc",
-        "per_page": 50,
-        "page": 1,
-        "price_change_percentage": "24h"
-    }
-
-    headers = {
-        "User-Agent": "crypto-signal-bot"
-    }
-
-    for attempt in range(MAX_RETRIES):
-
-        try:
-
-            logger.info("Fetching market data...")
-
-            r = requests.get(
-                COINGECKO_MARKET_URL,
-                params=params,
-                headers=headers,
-                timeout=15
-            )
-
-            if r.status_code == 429:
-
-                wait = 20 * (attempt + 1)
-                logger.warning(f"Rate limited. Waiting {wait}s")
-                time.sleep(wait)
-                continue
-
-            r.raise_for_status()
-
-            data = r.json()
-
-            logger.info(f"Fetched {len(data)} coins")
-
-            return data
-
-        except Exception as e:
-
-            logger.error(f"API error: {e}")
-
-            wait = 10 * (attempt + 1)
-            time.sleep(wait)
-
-    return []
-
-# =========================
-# GENERATE CHART IMAGE
-# =========================
-
-def generate_chart(coin_id):
+def fetch_tickers():
 
     try:
 
-        url = COINGECKO_CHART_URL.format(coin_id)
+        r = requests.get(BINANCE_TICKER, timeout=10)
 
-        params = {
-            "vs_currency": "usd",
-            "days": "1",
-            "interval": "hourly"
-        }
+        return r.json()
 
-        r = requests.get(url, params=params, timeout=15)
+    except:
+
+        return []
+
+
+# ======================
+# NEW LISTINGS
+# ======================
+
+def check_new_listings():
+
+    global known_pairs
+
+    try:
+
+        r = requests.get(BINANCE_EXCHANGE)
 
         data = r.json()
 
-        prices = [p[1] for p in data["prices"]]
+        symbols = {s["symbol"] for s in data["symbols"]}
 
-        plt.figure(figsize=(6,4))
+        if not known_pairs:
 
-        plt.plot(prices)
+            known_pairs = symbols
+            return
 
-        plt.title(f"{coin_id.upper()} 24H Chart")
-        plt.xlabel("Time")
-        plt.ylabel("Price")
+        new = symbols - known_pairs
 
-        filename = f"{coin_id}_chart.png"
+        for coin in new:
 
-        plt.savefig(filename)
+            msg = f"🚀 *New Binance Listing*\n\n{coin}"
 
-        plt.close()
+            send_message(msg)
 
-        return filename
+        known_pairs = symbols
 
     except Exception as e:
 
-        logger.error(f"Chart generation failed: {e}")
+        logger.error(e)
+
+
+# ======================
+# VOLUME SPIKE
+# ======================
+
+def detect_volume_spike(tickers):
+
+    signals = []
+
+    for coin in tickers:
+
+        try:
+
+            volume = float(coin["quoteVolume"])
+            change = float(coin["priceChangePercent"])
+
+            if volume > 100000000 and abs(change) > 5:
+
+                signals.append(coin)
+
+        except:
+
+            pass
+
+    return signals
+
+
+# ======================
+# BREAKOUT DETECTION
+# ======================
+
+def breakout_signal(symbol):
+
+    try:
+
+        params = {
+            "symbol": symbol,
+            "interval": "1h",
+            "limit": 50
+        }
+
+        r = requests.get(BINANCE_KLINES, params=params)
+
+        data = r.json()
+
+        closes = np.array([float(c[4]) for c in data])
+
+        resistance = max(closes[:-1])
+
+        if closes[-1] > resistance:
+
+            return True
+
+    except:
+
+        pass
+
+    return False
+
+
+# ======================
+# TP SL CALCULATION
+# ======================
+
+def generate_trade_levels(price):
+
+    tp1 = price * 1.03
+    tp2 = price * 1.06
+    tp3 = price * 1.10
+    sl = price * 0.97
+
+    return tp1, tp2, tp3, sl
+
+
+# ======================
+# CHART
+# ======================
+
+def generate_chart(symbol):
+
+    try:
+
+        params = {
+            "symbol": symbol,
+            "interval": "1h",
+            "limit": 40
+        }
+
+        r = requests.get(BINANCE_KLINES, params=params)
+
+        data = r.json()
+
+        closes = [float(x[4]) for x in data]
+
+        plt.figure(figsize=(6,4))
+
+        plt.plot(closes)
+
+        plt.title(symbol)
+
+        file = f"{symbol}.png"
+
+        plt.savefig(file)
+
+        plt.close()
+
+        return file
+
+    except:
 
         return None
 
-# =========================
-# DETECT SIGNALS
-# =========================
 
-def detect_signals(data):
-
-    gainers = []
-    losers = []
-
-    for coin in data:
-
-        change = coin.get("price_change_percentage_24h")
-
-        if change is None:
-            continue
-
-        if change > 8:
-            gainers.append(coin)
-
-        elif change < -8:
-            losers.append(coin)
-
-    return gainers, losers
-
-# =========================
-# MAIN BOT
-# =========================
+# ======================
+# MAIN SIGNAL ENGINE
+# ======================
 
 def run_bot():
 
-    logger.info("Crypto Signal Bot starting...")
+    logger.info("Bot started")
 
-    send_telegram("✅ Crypto Signal Bot deployed successfully on Railway!")
+    send_message("✅ AI Crypto Signal Bot started")
 
     while True:
 
-        logger.info("Running signal check...")
+        try:
 
-        data = fetch_market()
+            check_new_listings()
 
-        if not data:
+            tickers = fetch_tickers()
 
-            logger.warning("No market data fetched")
+            spikes = detect_volume_spike(tickers)
 
-            time.sleep(FETCH_INTERVAL)
+            for coin in spikes[:5]:
 
-            continue
+                symbol = coin["symbol"]
 
-        gainers, losers = detect_signals(data)
+                if not symbol.endswith("USDT"):
+                    continue
 
-        signals = gainers[:3] + losers[:3]
+                breakout = breakout_signal(symbol)
 
-        if not signals:
+                if not breakout:
+                    continue
 
-            send_telegram("No strong signals right now.")
+                price = float(coin["lastPrice"])
 
-        for coin in signals:
+                tp1, tp2, tp3, sl = generate_trade_levels(price)
 
-            name = coin["name"]
-            symbol = coin["symbol"].upper()
-            price = coin["current_price"]
-            change = coin["price_change_percentage_24h"]
+                msg = f"""
+🚨 *Breakout Signal*
 
-            message = f"""
-🚨 Crypto Signal
+{symbol}
 
-{name} ({symbol})
+Entry: {price}
 
-Price: ${price}
-24h Change: {round(change,2)}%
+TP1: {round(tp1,4)}
+TP2: {round(tp2,4)}
+TP3: {round(tp3,4)}
+
+SL: {round(sl,4)}
+
+Volume Spike + Breakout
 """
 
-            chart = generate_chart(coin["id"])
+                chart = generate_chart(symbol)
 
-            if chart:
+                if chart:
 
-                send_chart(message, chart)
+                    send_chart(msg, chart)
 
-            else:
+                else:
 
-                send_telegram(message)
+                    send_message(msg)
 
-        logger.info(f"Sleeping {FETCH_INTERVAL}s")
+        except Exception as e:
+
+            logger.error(e)
 
         time.sleep(FETCH_INTERVAL)
 
-# =========================
+
+# ======================
 # START
-# =========================
+# ======================
 
 if __name__ == "__main__":
 
