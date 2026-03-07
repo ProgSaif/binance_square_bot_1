@@ -12,7 +12,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
-FETCH_INTERVAL = 600  # 10 minutes
+FETCH_INTERVAL = 60  # 10 minutes
 MAX_RETRIES = 5
 
 # =========================
@@ -45,7 +45,7 @@ def send_telegram(message):
     }
 
     try:
-        r = requests.post(url, json=payload, timeout=1)
+        r = requests.post(url, json=payload, timeout=10)
         r.raise_for_status()
         logger.info("Message sent to Telegram")
 
