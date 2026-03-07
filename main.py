@@ -3,23 +3,22 @@ import time
 import os
 import logging
 import matplotlib.pyplot as plt
-import numpy as np
 
-# =========================
+# ======================
 # CONFIG
-# =========================
+# ======================
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-BINANCE_TICKER = "https://api.binance.com/api/v3/ticker/24hr"
-BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
+COINGECKO_MARKETS = "https://api.coingecko.com/api/v3/coins/markets"
+COINGECKO_CHART = "https://api.coingecko.com/api/v3/coins/{}/market_chart"
 
 FETCH_INTERVAL = 600
 
-# =========================
+# ======================
 # LOGGING
-# =========================
+# ======================
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,9 +27,9 @@ logging.basicConfig(
 
 logger = logging.getLogger()
 
-# =========================
-# TELEGRAM TEXT
-# =========================
+# ======================
+# TELEGRAM MESSAGE
+# ======================
 
 def send_message(text):
 
@@ -43,18 +42,15 @@ def send_message(text):
     }
 
     try:
-
         requests.post(url, json=payload)
-
         logger.info("Telegram message sent")
 
     except Exception as e:
-
         logger.error(e)
 
-# =========================
+# ======================
 # TELEGRAM CHART
-# =========================
+# ======================
 
 def send_chart(text, image):
 
@@ -74,23 +70,32 @@ def send_chart(text, image):
 
             requests.post(url, data=payload, files=files)
 
-        logger.info("Chart sent")
-
     except Exception as e:
-
         logger.error(e)
 
-# =========================
-# FETCH BINANCE DATA
-# =========================
+# ======================
+# FETCH MARKET DATA
+# ======================
 
-def fetch_tickers():
+def fetch_market():
+
+    params = {
+        "vs_currency": "usd",
+        "order": "market_cap_desc",
+        "per_page": 50,
+        "page": 1,
+        "price_change_percentage": "24h"
+    }
 
     try:
 
-        r = requests.get(BINANCE_TICKER, timeout=10)
+        r = requests.get(COINGECKO_MARKETS, params=params, timeout=10)
 
-        return r.json()
+        data = r.json()
+
+        logger.info(f"Fetched {len(data)} coins")
+
+        return data
 
     except Exception as e:
 
@@ -98,81 +103,55 @@ def fetch_tickers():
 
         return []
 
-# =========================
+# ======================
 # DETECT SIGNALS
-# =========================
+# ======================
 
-def detect_signals(tickers):
+def detect_signals(data):
 
     signals = []
 
-    for coin in tickers:
+    for coin in data:
 
-        try:
+        change = coin.get("price_change_percentage_24h")
 
-            symbol = coin["symbol"]
+        if change is None:
+            continue
 
-            if not symbol.endswith("USDT"):
-                continue
+        if abs(change) > 6:
 
-            price = float(coin["lastPrice"])
-            change = float(coin["priceChangePercent"])
-            volume = float(coin["quoteVolume"])
-
-            if abs(change) > 5 or volume > 50000000:
-
-                signals.append({
-                    "symbol": symbol,
-                    "price": price,
-                    "change": change
-                })
-
-        except:
-
-            pass
+            signals.append(coin)
 
     return signals
 
-# =========================
-# TP / SL GENERATION
-# =========================
+# ======================
+# GENERATE CHART
+# ======================
 
-def generate_trade_levels(price):
-
-    tp1 = price * 1.03
-    tp2 = price * 1.06
-    tp3 = price * 1.10
-    sl = price * 0.97
-
-    return tp1, tp2, tp3, sl
-
-# =========================
-# CHART GENERATION
-# =========================
-
-def generate_chart(symbol):
+def generate_chart(coin):
 
     try:
 
+        url = COINGECKO_CHART.format(coin["id"])
+
         params = {
-            "symbol": symbol,
-            "interval": "1h",
-            "limit": 40
+            "vs_currency": "usd",
+            "days": "1"
         }
 
-        r = requests.get(BINANCE_KLINES, params=params)
+        r = requests.get(url, params=params)
 
         data = r.json()
 
-        closes = [float(c[4]) for c in data]
+        prices = [p[1] for p in data["prices"]]
 
         plt.figure(figsize=(6,4))
 
-        plt.plot(closes)
+        plt.plot(prices)
 
-        plt.title(symbol)
+        plt.title(coin["symbol"].upper())
 
-        file = f"{symbol}.png"
+        file = f"{coin['symbol']}.png"
 
         plt.savefig(file)
 
@@ -186,57 +165,43 @@ def generate_chart(symbol):
 
         return None
 
-# =========================
-# MAIN BOT LOOP
-# =========================
+# ======================
+# BOT LOOP
+# ======================
 
 def run_bot():
 
     logger.info("Bot started")
 
-    send_message("✅ AI Crypto Signal Bot started")
+    send_message("✅ Crypto Signal Bot started")
 
     while True:
 
         try:
 
-            logger.info("Fetching market data")
+            data = fetch_market()
 
-            tickers = fetch_tickers()
-
-            if not tickers:
-
-                time.sleep(FETCH_INTERVAL)
-                continue
-
-            signals = detect_signals(tickers)
+            signals = detect_signals(data)
 
             logger.info(f"{len(signals)} signals detected")
 
             for coin in signals[:5]:
 
-                symbol = coin["symbol"]
-                price = coin["price"]
-                change = coin["change"]
-
-                tp1, tp2, tp3, sl = generate_trade_levels(price)
+                name = coin["name"]
+                symbol = coin["symbol"].upper()
+                price = coin["current_price"]
+                change = coin["price_change_percentage_24h"]
 
                 msg = f"""
 🚨 Crypto Signal
 
-{symbol}
+{name} ({symbol})
 
-Price: {price}
+Price: ${price}
 24h Change: {round(change,2)}%
-
-TP1: {round(tp1,4)}
-TP2: {round(tp2,4)}
-TP3: {round(tp3,4)}
-
-SL: {round(sl,4)}
 """
 
-                chart = generate_chart(symbol)
+                chart = generate_chart(coin)
 
                 if chart:
 
@@ -254,9 +219,9 @@ SL: {round(sl,4)}
 
         time.sleep(FETCH_INTERVAL)
 
-# =========================
+# ======================
 # START
-# =========================
+# ======================
 
 if __name__ == "__main__":
 
